@@ -4,9 +4,12 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -32,7 +35,36 @@ type NPIPacket struct {
 	Checksum      byte
 }
 
+func initLogger() *os.File {
+	// Create logs directory if it doesn't exist
+	logDir := "logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Fatalf("Failed to create log directory: %v", err)
+	}
+
+	// Create log file with timestamp in name
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	logFile := filepath.Join(logDir, fmt.Sprintf("npi_parser_%s.log", timestamp))
+
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+
+	// Set log output to file and stdout
+	multiWriter := io.MultiWriter(os.Stdout, file)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+
+	log.Printf("NPI Parser logging started")
+	return file
+}
+
 func main() {
+	// Initialize logger
+	logFile := initLogger()
+	defer logFile.Close()
+
 	tester := &NPITester{
 		connections: make(map[string]net.Conn),
 		stopChan:    make(chan struct{}),
@@ -47,8 +79,15 @@ func main() {
 
 	tester.interval = time.Duration(*interval) * time.Second
 
+	log.Printf("Starting NPI Parser Tester with settings:")
+	log.Printf("Host: %s", tester.host)
+	log.Printf("Port: %s", tester.port)
+	log.Printf("Number of tags: %d", tester.numTags)
+	log.Printf("Number of infrastructure devices: %d", tester.numInfra)
+	log.Printf("Interval: %v", tester.interval)
+
 	if err := tester.Start(); err != nil {
-		fmt.Printf("Failed to start tester: %v\n", err)
+		log.Printf("Failed to start tester: %v", err)
 		return
 	}
 
@@ -80,6 +119,7 @@ func (t *NPITester) sendPackets(infraMAC string, conn net.Conn) {
 	for {
 		select {
 		case <-t.stopChan:
+			log.Printf("Stopping packet sender for infra %s", infraMAC)
 			return
 		default:
 			for tagNum := 0; tagNum < t.numTags; tagNum++ {
@@ -87,24 +127,33 @@ func (t *NPITester) sendPackets(infraMAC string, conn net.Conn) {
 				packet := t.createNPIPacket(infraMAC, tagMAC, sqn, bleSqn)
 
 				// Add delimiter (SOF)
-				conn.Write([]byte{0xFE})
-
-				// Send packet
-				if _, err := conn.Write(packet); err != nil {
-					fmt.Printf("Error sending packet: %v\n", err)
+				if _, err := conn.Write([]byte{0xFE}); err != nil {
+					log.Printf("Error writing SOF: %v", err)
 					return
 				}
 
-				fmt.Printf("Sent packet from infra %s for tag %s\n", infraMAC, tagMAC)
+				// Send packet
+				if _, err := conn.Write(packet); err != nil {
+					log.Printf("Error sending packet: %v", err)
+					return
+				}
+
+				log.Printf("Sent packet from infra %s for tag %s (sqn: %d, bleSqn: %d)",
+					infraMAC, tagMAC, sqn, bleSqn)
+
+				// Optional: log packet bytes in hex
+				log.Printf("Packet bytes: %X", packet)
 			}
 
 			sqn++
 			if sqn > 65000 {
+				log.Printf("Resetting sqn counter")
 				sqn = 1
 			}
 
 			bleSqn++
 			if bleSqn > 255 {
+				log.Printf("Resetting bleSqn counter")
 				bleSqn = 1
 			}
 
@@ -216,14 +265,18 @@ func reverseBytes(b []byte) {
 func waitForInterrupt(t *NPITester) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	sig := <-sigChan
 
+	log.Printf("Received signal %v, shutting down...", sig)
 	close(t.stopChan)
 
 	t.connLock.Lock()
 	defer t.connLock.Unlock()
 
-	for _, conn := range t.connections {
+	for mac, conn := range t.connections {
+		log.Printf("Closing connection for %s", mac)
 		conn.Close()
 	}
+
+	log.Printf("Shutdown complete")
 }

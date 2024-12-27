@@ -7,54 +7,27 @@ This tool simulates devices sending packets to a target UDP server. It allows mu
 - Simulates multiple devices with unique MAC addresses.
 - Sends ELP packets with device, RSSI, and IR data.
 - Configurable via a simple configuration file.
+- Logging to both console and file.
+- Command-line configuration.
 
-## Configuration
+## Usage
 
-The tool uses a configuration file (`config.json`) to define runtime parameters. Below is an example of the `config.json` structure:
+Run the program with command-line flags to configure the simulation:
+
+### Available Flags
+
+| Flag | Description | Default Value |
+|------|-------------|---------------|
+| `-devices` | Number of devices to simulate | 1 |
+| `-interval` | Interval between packets (seconds) | 2 |
+| `-ip` | Target IP address | 127.0.0.1 |
+| `-port` | Target port number | 8552 |
+| `-mac` | Base MAC address | C4:CB:6B:23:00:01 |
+
+### Example
 
 ```
-{
-  "NumDevices": 5,
-  "IntervalSec": 2,
-  "TargetIP": "127.0.0.1",
-  "TargetPort": 8080,
-  "BaseMAC": "C4:CB:6B:50:00:00"
-}
+go run main.go -ip 127.0.0.1 -port 8552 -devices 1 -mac C4:CB:6B:23:00:01 -interval 5
 ```
 
-## Configuration Parameters:
-
-- **NumberDevices**: Number of simulated devices.
-- **IntervalSec**: Interval (in seconds) between packet transmissions.
-- **TargetIP**: IP address of the UDP server.
-- **TargetPort**: Port of the UDP server.
-- **BaseMAC**: Base MAC address for devices. Each device increments the MAC.
-
-## How to Run
-
-1. **Setup Configuration**: Update a config.json file in the project directory following the format above.
-2. **Run the Program**:
-   ```
-   go run main.go
-   ```
-3. **Output**: The program logs device packet transmission to the console.
-
-## Flow Overview
-
-1. **Initialization**:
-   - Read configuration from `config.json`.
-   - Parse the number of devices, interval, target address, and base MAC.
-2. **Device Simulation**:
-   - Each device is assigned a unique MAC address based on the base MAC.
-   - A goroutine is created for each device to handle concurrent execution.
-3. **Packet Generation**:
-   - Each device generates:
-     - Device data.
-     - RSSI data from multiple APs.
-     - IR data.
-   - Packets are built with the data and a sequence number.
-4. **Packet Transmission**:
-   - Packets are sent to the target UDP server.
-   - Logs are generated for each transmission, showing sequence number and MAC.
-5. **Repeat**:
-   - The process continues at the configured interval until stopped.
+This will start the simulation with 2 devices, sending packets every second to 127.0.0.1:8552, using C4:CB:6B:23:00:01 as the base MAC address.

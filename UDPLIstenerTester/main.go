@@ -3,9 +3,14 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"flag"
 	"fmt"
+	"io"
+	"log"
 	"math/rand"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -78,6 +83,54 @@ type XpertAlpParser struct {
 const (
 	MaxSeqNum = 65000
 )
+
+type Config struct {
+	NumDevices  int
+	IntervalSec int
+	TargetIP    string
+	TargetPort  int
+	BaseMAC     string
+}
+
+func initLogger() *os.File {
+	// Create logs directory if it doesn't exist
+	logDir := "logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Fatalf("Failed to create log directory: %v", err)
+	}
+
+	// Create log file with timestamp in name
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	logFile := filepath.Join(logDir, fmt.Sprintf("udp_sender_%s.log", timestamp))
+
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+
+	// Set log output to both file and stdout
+	multiWriter := io.MultiWriter(os.Stdout, file)
+	log.SetOutput(multiWriter)
+	log.SetFlags(0)
+
+	return file
+}
+
+func parseFlags() *Config {
+	config := &Config{}
+
+	// Define command line flags
+	flag.IntVar(&config.NumDevices, "devices", 1, "Number of devices to simulate")
+	flag.IntVar(&config.IntervalSec, "interval", 2, "Interval between packets in seconds")
+	flag.StringVar(&config.TargetIP, "ip", "127.0.0.1", "Target IP address")
+	flag.IntVar(&config.TargetPort, "port", 8552, "Target port number")
+	flag.StringVar(&config.BaseMAC, "mac", "C4:CB:6B:23:00:01", "Base MAC address")
+
+	// Parse flags
+	flag.Parse()
+
+	return config
+}
 
 func GenerateAlpAdditionalInfo() *AlpAdditionalInfo {
 	return &AlpAdditionalInfo{
@@ -186,9 +239,14 @@ func BuildELPPacket(seqNum uint16, deviceData *AlpDeviceData, rssiData []*AlpRss
 	deviceChunk = append(deviceChunk, deviceData.MenuItem)
 	deviceChunk = append(deviceChunk, deviceData.BatteryLevel)
 	deviceChunk = append(deviceChunk, deviceData.MessageID)
-	additionalInfo := BuildAdditionalInfo(deviceData.AddnlInfo)
-	deviceChunk = append(deviceChunk, additionalInfo)
-	deviceChunk = append(deviceChunk, Uint16ToBytes(deviceData.ScanReason)...)
+	deviceChunk = append(deviceChunk, BuildAdditionalInfo(deviceData.AddnlInfo))
+
+	// ScanReason (2 bytes) - value 3 (Periodic) with RequestAck
+	scanReason := uint16(deviceData.ScanReason)
+	if deviceData.RequestAck {
+		scanReason |= 0x8000 // Set the highest bit for RequestAck
+	}
+	deviceChunk = append(deviceChunk, Uint16ToBytes(scanReason)...)
 	deviceChunk = append(deviceChunk, Uint16ToBytes(deviceData.ScannedChannels)...)
 
 	// Construct RSSI Chunks
@@ -268,9 +326,10 @@ func BuildAdditionalInfo(info *AlpAdditionalInfo) uint8 {
 	return result
 }
 
-func logWithTime(message string) {
+func logWithTime(format string, args ...interface{}) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	fmt.Printf("[%s] %s\n", timestamp, message)
+	message := fmt.Sprintf(format, args...)
+	log.Printf("[%s] %s", timestamp, message)
 }
 
 // SendPackets simulates a device sending packets
@@ -279,7 +338,7 @@ func SendPackets(deviceIndex int, baseMAC string, interval time.Duration, target
 	mac := GenerateMAC(baseMAC, deviceIndex)
 	conn, err := net.Dial("udp", targetAddr)
 	if err != nil {
-		logWithTime(fmt.Sprintf("[Device %d] Error: %v", deviceIndex, err))
+		logWithTime("[Device %d] Error: %v", deviceIndex, err)
 		return
 	}
 	defer conn.Close()
@@ -301,11 +360,12 @@ func SendPackets(deviceIndex int, baseMAC string, interval time.Duration, target
 		// Send the packet
 		_, writeErr := conn.Write(packet)
 		if writeErr != nil {
-			logWithTime(fmt.Sprintf("[Device %d] Error sending packet: %v", deviceIndex, writeErr))
+			logWithTime("[Device %d] Error sending packet: %v", deviceIndex, writeErr)
 			break
 		}
 
-		logWithTime(fmt.Sprintf("[Device %d] Sent packet: Seq=%d, MAC=%X", deviceIndex, seqNum, mac))
+		logWithTime("[Device %d] Sent packet: Seq=%d, MAC=%X",
+			deviceIndex, seqNum, mac)
 
 		seqNum++
 		if seqNum > MaxSeqNum {
@@ -317,23 +377,30 @@ func SendPackets(deviceIndex int, baseMAC string, interval time.Duration, target
 }
 
 func main() {
-	numDevices := Config.NumDevices
-	intervalSec := Config.IntervalSec
-	targetIP := Config.TargetIP
-	targetPort := Config.TargetPort
-	targetAddr := fmt.Sprintf("%s:%d", targetIP, targetPort)
-	baseMAC := Config.BaseMAC
+	// Initialize logger
+	logFile := initLogger()
+	defer logFile.Close()
 
-	fmt.Printf("Starting simulation with %d devices, interval: %d seconds, target: %s\n", numDevices, intervalSec, targetAddr)
+	// Parse command line flags
+	config := parseFlags()
+
+	// Log configuration
+	logWithTime("Starting UDP sender with configuration:")
+	logWithTime("Number of devices: %d", config.NumDevices)
+	logWithTime("Interval: %d seconds", config.IntervalSec)
+	logWithTime("Target: %s:%d", config.TargetIP, config.TargetPort)
+	logWithTime("Base MAC: %s", config.BaseMAC)
+
+	targetAddr := fmt.Sprintf("%s:%d", config.TargetIP, config.TargetPort)
 
 	var wg sync.WaitGroup
-	for i := 0; i < numDevices; i++ {
+	for i := 0; i < config.NumDevices; i++ {
 		wg.Add(1)
 		go func(deviceIndex int) {
-			SendPackets(deviceIndex, baseMAC, time.Duration(intervalSec)*time.Second, targetAddr, &wg)
+			SendPackets(deviceIndex, config.BaseMAC, time.Duration(config.IntervalSec)*time.Second, targetAddr, &wg)
 		}(i)
 	}
 
 	wg.Wait()
-	fmt.Println("Simulation complete.")
+	log.Println("Simulation complete.")
 }

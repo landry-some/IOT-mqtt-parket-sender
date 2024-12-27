@@ -152,10 +152,10 @@ func GenerateAlpIrData() *AlpIrData {
 	irMac := "C4CB6B500101"
 	return &AlpIrData{
 		IRMAC:                   GenerateAlpMac(irMac),
-		IRTransmitterID:         [4]byte{0x00, 0x22, 0x04, 0xD8},
-		IRTransmitterIDAsString: "002204D8",
+		IRTransmitterID:         [4]byte{0xFF, 0xBF, 0x00, 0x01},
+		IRTransmitterIDAsString: "FFBF0001",
 		RawBytes:                []byte("IR_RAW_BYTES"),
-		Signal:                  -50,
+		Signal:                  -75,
 		Timestamp:               int(time.Now().UnixMilli() % 0xFFFFFFFF),
 	}
 }
@@ -204,9 +204,9 @@ func BuildELPPacket(seqNum uint16, deviceData *AlpDeviceData, rssiData []*AlpRss
 	// Construct IR Chunks
 	irChunks := make([]byte, 0)
 	for _, ir := range irData {
-		irChunks = append(irChunks, []byte{0xFF, 0xFF}...) // Reserved
+		irChunks = append(irChunks, []byte{0xFF, 0xBF, 0x00, 0x01}...)
 		irChunks = append(irChunks, ir.IRTransmitterID[:]...)
-		irChunks = append(irChunks, make([]byte, 10)...) // Reserved
+		irChunks = append(irChunks, []byte{0x00, 0x00, 0x00, 0x00}...)
 		irChunks = append(irChunks, Uint32ToBytes(uint32(ir.Timestamp))...)
 	}
 

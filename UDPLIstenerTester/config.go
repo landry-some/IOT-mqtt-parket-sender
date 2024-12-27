@@ -9,9 +9,9 @@ var Config = struct {
 	BaseMAC     string
 	APMacs      [5]string
 }{
-	NumDevices:  5,                   // Number of devices
+	NumDevices:  1,                   // Number of devices
 	IntervalSec: 2,                   // Interval in seconds
 	TargetIP:    "127.0.0.1",         // Target IP
-	TargetPort:  8080,                // Target port
+	TargetPort:  8552,                // Target port
 	BaseMAC:     "C4:CB:6B:23:00:01", // Starting MAC address
 }

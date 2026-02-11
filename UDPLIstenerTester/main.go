@@ -216,13 +216,21 @@ func GenerateAlpIrData() *AlpIrData {
 func GenerateMAC(baseMAC string, index int) [6]byte {
 	var mac [6]byte
 	fmt.Sscanf(baseMAC, "%x:%x:%x:%x:%x:%x", &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5])
-	mac[5] += byte(index)
-	for i := 5; i > 0; i-- {
-		if mac[i] > 255 {
-			mac[i] = 0
-			mac[i-1]++
-		}
-	}
+
+	macInt := uint64(mac[0])<<40 | uint64(mac[1])<<32 | uint64(mac[2])<<24 |
+		uint64(mac[3])<<16 | uint64(mac[4])<<8 | uint64(mac[5])
+
+	// Increment the MAC address
+	macInt += uint64(index)
+
+	// Convert back to a 6-byte MAC address
+	mac[0] = byte((macInt >> 40) & 0xFF)
+	mac[1] = byte((macInt >> 32) & 0xFF)
+	mac[2] = byte((macInt >> 24) & 0xFF)
+	mac[3] = byte((macInt >> 16) & 0xFF)
+	mac[4] = byte((macInt >> 8) & 0xFF)
+	mac[5] = byte(macInt & 0xFF)
+
 	return mac
 }
 
